@@ -1,7 +1,5 @@
 .data  
-	plufile: .asciiz "NCR/plu.txt"
-	ctlfile: .asciiz "NCR/ctl.txt"
-	sell: .asciiz "NCR/sells.txt"
+	plufile: .asciiz "NCR-MIPS/plu.dat"
 	buffer: .space 1024
 	errorLoadParam: .asciiz "\n\nL'Anagrafica è vuota"
 	ean: .asciiz "\nEAN: "
@@ -12,6 +10,7 @@
 	articoli: .word 0
 	articoli_n: .word 0
 	linebreak: .asciiz "\n"
+	readFileSpace: .space 15
 .text
 ################################################
 main:	
@@ -38,32 +37,52 @@ loadPLU:
 	move $t9, $v0      	# save the file descriptor
 	
 	readingPLU:
-		# reading from file just opened
+		# reading ean from first words
 		li $v0, 14       	# system call for reading from file = 14
 		move $a0, $t9      	# file descriptor 
 		la $a1, buffer   	# address of buffer from which to read
-		li $a2, 30	  	# hardcoded buffer length
+		li $a2, 32		# hardcoded buffer length
 		syscall            	# read from file
 		
-		la $a0, buffer		# load buffer
-		add $a0, $a0, $v0	# calculate address of byte after file data
-		sb $zero, 0($a0)	# set that byte to zero
-		
 		beq $v0, $zero, doneReading
-        	slt $t0, $v0, $zero      
-        	beq $t0, 1,     doneReading
-				
+        	slt $t0, $v0, $zero
+        	beq $t0, 1, doneReading
+		
+		la $a0, buffer
+		li $a1, 0
+		li $a2, 13		
+		move $t8, $ra
+		jal substring
+		move $s0, $v0
+		move $ra, $t8
+		
 		li $v0, 4
-		la $a1, buffer
-		subi $a1, $a1, 17
-		la $a0, 0($a1)
+		move $a0, $s0
 		syscall
 		
-			
-		#save into PLU stack
-		la $a0, temp_ean
-		la $a1, temp_text
-		li $a2, 00399
+		la $a0, buffer
+		li $a1, 13
+		li $a2, 25		
+		move $t8, $ra
+		jal substring
+		move $s0, $v0
+		move $ra, $t8
+		
+		li $v0, 4
+		move $a0, $s0
+		syscall
+		
+		la $a0, buffer
+		li $a1, 25
+		li $a2, 32		
+		move $t8, $ra
+		jal substring
+		move $s0, $v0
+		move $ra, $t8
+		
+		li $v0, 4
+		move $a0, $s0
+		syscall
 		
 		move $t8, $ra 
 		#jal articoli_push
@@ -78,22 +97,6 @@ loadPLU:
 		syscall            # close file
 	
 		jr $ra
-
-####### GESTIONE BUFFERS ####################
-clearBuffer:
-	la $t0, buffer		# t3 <- &buffer
-	li $t1, 0		# t0 <- i = 0
-	clearLoop:		# for(i=0,i<256,i++)
-		slti $t2, $t1, 256			# if(i<256) t1 <- 1 else t1 <- 0
-		beq $t2, $zero, endClearLoop		# if(t1==0) ovvero se(i>=256) end loop...
-		sll $t2, $t1, 2				# t1 <- offset(i) = i * 4
-		add $t4, $t0, $t2			# t4 <- &buffer[i] = &buffer + offset(i)
-		sb $zero, 0($t4)			# buffer_str[i] <- zero
-		addi $t1, $t1, 1			# i++
-	j clearLoop
-	
-	endClearLoop:
-	jr $ra
 
 ######### METODI STACK ##################
 articoli_push:
@@ -165,9 +168,34 @@ substring:
 	move $t0, $a0		# STRINGA
 	move $t1, $a1		# START
 	move $t2, $a2		# END
+	add $t4, $t4, $zero 
 	
-	add $t0, $t0, $t1
+	la $a0, readFileSpace
+	SCAN:
+	add $t3, $t0, $t1		
+	lb $t3, 0($t3)
+	addi $a0, $a0, 1
+	sb $t3, 0($a0)
+	addi $t1, $t1, 1
+	addi $t4, $t4, 1
+	bne $t1, $a2, SCAN
 	
-	la $v0, $t0
+	subi $t4, $t4, 1
+	sub $v0, $a0, $t4
 	
+	jr $ra
+	
+clearBuffer:
+	la $t0, buffer		# t3 <- &buffer
+	li $t1, 0		# t0 <- i = 0
+	clearLoop:		# for(i=0,i<256,i++)
+		slti $t2, $t1, 256			# if(i<256) t1 <- 1 else t1 <- 0
+		beq $t2, $zero, endClearLoop		# if(t1==0) ovvero se(i>=256) end loop...
+		sll $t2, $t1, 2				# t1 <- offset(i) = i * 4
+		add $t4, $t0, $t2			# t4 <- &buffer[i] = &buffer + offset(i)
+		sb $zero, 0($t4)			# buffer_str[i] <- zero
+		addi $t1, $t1, 1			# i++
+	j clearLoop
+	
+	endClearLoop:
 	jr $ra
