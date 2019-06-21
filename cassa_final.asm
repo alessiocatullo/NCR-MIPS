@@ -3,18 +3,22 @@
 	buffer: .space 24			# 24 = 22 Caratteri effettivi + char fine stringa + char a capo
 	.align 2
 	buffer_ean: .space 6
-	line_break: .asciiz "\n"
+	line_break: .byte '\n'
 	separator: .byte ':'			# Separatore per prelevare la descrizione ed il prezzo
 	#-------------- STRINGHE UTILI------------#
 	emptyPlu: .asciiz "\n\nANAGRAFICA VUOTA\n\n"
 	benvenuto: .asciiz "\n\nBenvenuto/a nel software POS di cassa leader nel mercato!\nCon questo software potrai simulare una vera e propria transazione di vendita stile supermercato!\n\n"
 	menu: .asciiz "\n---------MENU--------\n1- Transazione di vendita\n2- Visualizza prezzo\n3- Storico vendite\n4- Esci\n--> "
 	saluti: .asciiz "\n\nGrazie per aver utilizzato POS! Ci vediamo alla prossima vendita"
+	begin_fiscal: .asciiz "\n\n------ INIZIO TRANSAZIONE ------\n\n"
+	end_fiscal: .asciiz "\n\n------ FINE TRANSAZIONE ------\n\n"
+	abort_fiscal: .asciiz "\n\n------ TRANSAZIONE ABORTITA------\n\n"
 	check_price_str: .asciiz "\nInserisci il codice (EAN - Max 4 caratteri) del prodotto -> "
 	ean_not_founded_str: .asciiz "\nL'articolo non è presente nell'anagrafica! Controlla che il codice (EAN) sia corretto!\n"
 	text_str: .asciiz "\nArticolo: "
 	price_str: .asciiz " - Prezzo: "
 	other_check_str: .asciiz "\nVuoi visualizzare il prezzo di un altro articolo?\n1- Si\n2- No, torna al menu\n--> "
+	add_to_cart_str: .asciiz "\n\nArticolo aggiunto al carrello\n\n "
 	#-----------------------------------------#
 	cart: .space 0			# Array in cui vengono salvati gli articoli venduti
 	n_items: .word 0
@@ -34,17 +38,43 @@ main:
 	syscall
 	
 	beq $v0, 1, start_trans
-	beq $v0, 2, check_price	
+	beq $v0, 2, checkPrice	
 	beq $v0, 3, sales_history
 	beq $v0, 4, end
 
 	j menu_loop
 
 start_trans:
-j menu_loop
+	li $v0, 4
+	la $a0, begin_fiscal
+	syscall
+
+sell:
+	li $v0, 4
+	la $a0, check_price_str
+	syscall
+	
+	li $v0, 8
+	la $a0, buffer_ean
+	li $a1, 6
+	syscall
+	
+	addi $sp, $sp, -4
+        sw $ra, 0($sp)
+        jal findEAN
+        lw $ra, 0($sp)
+        addi $sp, $sp, 4
+        
+        bnez $v0, sell
+        
+      	addi $sp, $sp, -4
+        sw $ra, 0($sp)
+        jal addToCart
+        lw $ra, 0($sp)
+        addi $sp, $sp, 4
 
 #--------------- VISUALIZZA PREZZO ------------#
-check_price:
+checkPrice:
 	li $v0, 4
 	la $a0, check_price_str
 	syscall
@@ -118,10 +148,6 @@ findEAN:
 		move $a0, $s0      # file descriptor to close
 		syscall            # close file
 		
-		li $v0, 4
-		la $a0, text_str
-		syscall
-		
 		li $v0, 0
 		jr $ra
 
@@ -136,41 +162,56 @@ findEAN:
 		
 		li $v0, 1
 		jr $ra
-other_check:
+otherCheck:
 	li $v0, 4
 	la $a0, other_check_str
 	syscall	
 	
 	li $v0, 5
 	syscall
-	beq $v0, 1, check_price
+	beq $v0, 1, checkPrice
 	beq $v0, 2, menu_loop
 
-	j other_check
+	j otherCheck
 	
 printItem:
 	li $v0, 4
 	la $a0, text_str
 	syscall
-	
-	li $v0, 9
-	li $a0, 12
+	lb $t2, separator
+	lb $t3, line_break
+	la $t0, buffer
+	addi $t0, $t0, 5 		#Jumpo l'ean più il :
+
+	print_text_loop:
+	lb $t1, ($t0)
+	beq $t1, $t2, print_price
+	li $v0, 11
+	move $a0, $t1
 	syscall
+	addi $t0, $t0, 1
+	j print_text_loop
 	
-	la $t0, ($v0)
+	print_price:
 	li $v0, 4
-	la $a0, buffer
-	syscall
-	
-	li $a0, 4
 	la $a0, price_str
 	syscall
+	addi $t0, $t0, 1
 	
-	li $v0, 9
-	li $a0, 4
+	print_price_loop:
+	lb $t1, ($t0)
+	beq $t1, $t3, out_price 
+	li $v0, 11
+	move $a0, $t1
 	syscall
+	addi $t0, $t0, 1
+	j print_price_loop
 	
+	out_price:
 	jr $ra
 	
-add_to_cart:
+addToCart:
+	li $v0, 4
+	la $a0, add_to_cart_str
+	syscall
 	jr $ra
