@@ -4,6 +4,8 @@
 	.align 2
 	buffer_ean: .space 6
 	line_break: .byte '\n'
+	total_char: .byte 't'
+	abort_char: .byte 'a'
 	separator: .byte ':'			# Separatore per prelevare la descrizione ed il prezzo
 	#-------------- STRINGHE UTILI------------#
 	emptyPlu: .asciiz "\n\nANAGRAFICA VUOTA\n\n"
@@ -12,7 +14,8 @@
 	saluti: .asciiz "\n\nGrazie per aver utilizzato POS! Ci vediamo alla prossima vendita"
 	begin_fiscal: .asciiz "\n\n------ INIZIO TRANSAZIONE ------\n\n"
 	end_fiscal: .asciiz "\n\n------ FINE TRANSAZIONE ------\n\n"
-	abort_fiscal: .asciiz "\n\n------ TRANSAZIONE ABORTITA------\n\n"
+	abort_str: .asciiz "\n\n------ TRANSAZIONE ANNULLATA------\n\n"
+	total_str: .asciiz "\n\n------ TOTALE------\n\n"
 	check_price_str: .asciiz "\nInserisci il codice (EAN - Max 4 caratteri) del prodotto -> "
 	ean_not_founded_str: .asciiz "\nL'articolo non è presente nell'anagrafica! Controlla che il codice (EAN) sia corretto!\n"
 	text_str: .asciiz "\nArticolo: "
@@ -24,76 +27,113 @@
 	n_items: .word 0
 
 .text
-main:
-	li $v0, 4
+	li $v0, 4					# Messaggio di benvenuto
 	la $a0, benvenuto
 	syscall
 	
-	menu_loop:
+###### MENU ######
+main:
+	menu_loop:					# Start menu loop
 	li $v0, 4
 	la $a0, menu
 	syscall	
-		
+	
 	li $v0, 5
 	syscall
 	
-	beq $v0, 1, start_trans
-	beq $v0, 2, checkPrice	
-	beq $v0, 3, sales_history
-	beq $v0, 4, end
+	beq $v0, 1, startTrans				# Transazione di vendita
+	beq $v0, 2, checkPrice				# Visualizza prezzo
+	beq $v0, 3, sales_history			# Recap transazione
+	beq $v0, 4, end					# Esci
 
 	j menu_loop
-
-start_trans:
+	
+###### TRANSAZIONE DI VENDITA ######
+startTrans:
 	li $v0, 4
-	la $a0, begin_fiscal
+	la $a0, begin_fiscal				# Print stringa inizio transazione
 	syscall
 
-sell:
+sell:							# loop richiesta inserimento ean
 	li $v0, 4
 	la $a0, check_price_str
 	syscall
 	
 	li $v0, 8
-	la $a0, buffer_ean
-	li $a1, 6
+	la $a0, buffer_ean				# Leggo i massimo 4 caratteri per aggiungere (se esiste) un articolo al carrello
+	li $a1, 6					# 4 caratteri + carattere fine riga + enter
 	syscall
+	
+	addi $sp, $sp, -4				# mi salvo nello stack l'ean appena inserito
+        sw $a0, 0($sp)
+        
+	lb $s0, 0($a0)
+	lb $s1, abort_char				# Se il carattere inserito è 'a' la transazione viene annullata
+	beq $s1, $s0, abort
+	lb $s1, total_char				# Se il carattere inserito è 't' si passa al totale
+	beq $s1, $s0, total
 	
 	addi $sp, $sp, -4
         sw $ra, 0($sp)
-        jal findEAN
+        jal findEAN					# Cerco l'ean inserito sul file plu.dat
         lw $ra, 0($sp)
         addi $sp, $sp, 4
         
-        bnez $v0, sell
+        bnez $v0, sell					# findEAN != 0 -> jump sell
         
-      	addi $sp, $sp, -4
+        lw $a0, 0($sp)					# ripristino dallo stack l'ean inserito
+        addi $sp, $sp, 4				
+        
+      	addi $sp, $sp, -4	
         sw $ra, 0($sp)
-        jal addToCart
+        jal addToCart					# findEan == 0 -> aggiungo l'articolo al carrello
         lw $ra, 0($sp)
         addi $sp, $sp, 4
+	
+	j sell
 
-#--------------- VISUALIZZA PREZZO ------------#
+total:
+	li $v0, 4
+	la $a0, total_str				# Print stringa totale
+	syscall
+	
+	li $v0, 4
+	la $a0, end_fiscal				# Print stringa fine transazione
+	syscall
+	
+	#Qui effettuo il clear di tutte le variabili
+	j main
+	
+abort: 
+	li $v0, 4
+	la $a0, abort_str				# Print stringa abort della transazione
+	syscall
+	
+	#Qui effettuo il clear di tutte le variabili
+	j main
+###### VISUALIZZA PREZZO ###### 
 checkPrice:
 	li $v0, 4
 	la $a0, check_price_str
 	syscall
 	
 	li $v0, 8
-	la $a0, buffer_ean
+	la $a0, buffer_ean				# Leggo l'ean inserito
 	li $a1, 6
 	syscall
 	
 	addi $sp, $sp, -4
         sw $ra, 0($sp)
-        jal findEAN
+        jal findEAN					# Se esistente stampo le informazioni dell'articolo
         lw $ra, 0($sp)
         addi $sp, $sp, 4
-
+        
+        j main
+###### RECAP TRANSAZIONE ######
 sales_history:
 j menu_loop
 
-#------------ END ---------------#
+###### ESCI ######
 end:
 	la $v0, 4
 	la $a0, saluti
@@ -162,6 +202,7 @@ findEAN:
 		
 		li $v0, 1
 		jr $ra
+		
 otherCheck:
 	li $v0, 4
 	la $a0, other_check_str
@@ -210,8 +251,10 @@ printItem:
 	out_price:
 	jr $ra
 	
-addToCart:
+addToCart:						# Funzione che aggiunge l'ean al cart e ne incrementa la size							
+	li $v0, 4					# Printo l'ean
+	syscall
 	li $v0, 4
-	la $a0, add_to_cart_str
+	la $a0, add_to_cart_str				# Printo "aggiunto al carrello..."
 	syscall
 	jr $ra
