@@ -34,7 +34,7 @@
 	payment_print_cash: .asciiz "PAGAMENTO CONTANTI:              "
 	payment_amount_card: .asciiz "Inserire carta (pagamento parziale non permesso): "
 	payment_print_card: .asciiz "PAGAMENTO ELETTRONICO:           "
-	
+	payment_print_resto: .asciiz "\nRESTO:                           "
 	#----------- VARIABILI PER LA TRANSAZIONE --------#
 	cart: .word 0				# Stack in cui vengono salvati gli articoli venduti
 	n_articoli: .word 0			# numero di articoli nel carrello
@@ -144,9 +144,12 @@ total:
 	la $a0, total_str_details			# Print stringa totale complessivo
 	syscall
 	
-	li $v0, 1
 	lw $a0, tra_total
-	syscall
+      	addi $sp, $sp, -4	
+        sw $ra, 0($sp)
+        jal printPriceFormatted				# stampo il price formattato correttamente
+        lw $ra, 0($sp)
+        addi $sp, $sp, 4
 
 	li $v0, 11
 	lb $a0, line_break				# Print line_break
@@ -165,10 +168,14 @@ paymentMethod:						# Funzione che gestisce il pagamento attraverso 2 forme di p
 	la $a0, payment_str_1
 	syscall
 	
-	li $v0, 1
-	lw $t0, tra_total
-	move $a0, $t0
-	syscall
+	lw $s0, tra_total
+	
+	move $a0, $s0
+      	addi $sp, $sp, -4	
+        sw $ra, 0($sp)
+        jal printPriceFormatted				# stampo il price formattato correttamente
+        lw $ra, 0($sp)
+        addi $sp, $sp, 4
 	
 	li $v0, 4		
 	la $a0, payment_str_2
@@ -190,12 +197,17 @@ paymentMethod:						# Funzione che gestisce il pagamento attraverso 2 forme di p
 	li $v0, 5
 	syscall
 	move $t1, $v0					# offro la possibilità di pagare parzialmente
-	li $v0, 4		
+	li $v0, 4
 	la $a0, payment_print_cash
 	syscall
-	li $v0, 1		
-	move $a0, $t1
-	syscall
+	
+	la $a0, ($t1)
+      	addi $sp, $sp, -4	
+        sw $ra, 0($sp)
+        jal printPriceFormatted				# stampo il price formattato correttamente
+        lw $ra, 0($sp)
+        addi $sp, $sp, 4
+        
 	j update_total					# Vado all'update del totale
 	
 	payment_card:					# in caso fosse 2 = elettronico
@@ -207,21 +219,40 @@ paymentMethod:						# Funzione che gestisce il pagamento attraverso 2 forme di p
 	syscall
 	move $t1, $v0
 	
-	bne $t1, $t0, paymentMethod			# blocco il pagamento parziale per il pagamento elettronico 
+	bne $t1, $s0, paymentMethod			# blocco il pagamento parziale per il pagamento elettronico 
 							#(si può pagare solo tutto il totale complessivo
 	li $v0, 4		
 	la $a0, payment_print_card
 	syscall
-	li $v0, 1		
-	move $a0, $t1
-	syscall
+	
+	la $a0, ($t1)
+      	addi $sp, $sp, -4	
+        sw $ra, 0($sp)
+        jal printPriceFormatted				# stampo il price formattato correttamente
+        lw $ra, 0($sp)
+        addi $sp, $sp, 4
 	j update_total					# Vado all'update del totale
 	
 	update_total:
-	sub $t0, $t0, $t1				# Aggiorno il totale complessivo
-	sw $t0, tra_total
+	sub $s0, $s0, $t1				# Aggiorno il totale complessivo
+	sw $s0, tra_total
 	
-	bnez $t0, paymentMethod				# Se non ho finito di pagare, jumpo all'inizio del metodo
+	bgtz $s0, paymentMethod				# Se non ho finito di pagare, jumpo all'inizio del metodo
+	beqz $s0, endTransaction			# Se il totale complessivo è pari a 0 vado in endTransaction
+	
+	li $v0, 4					# Altrimenti printo il resto
+	la $a0, payment_print_resto
+	syscall
+	
+	li $t0, -1
+	mult $s0, $t0
+	mflo $s0
+	la $a0, ($s0)
+      	addi $sp, $sp, -4	
+        sw $ra, 0($sp)
+        jal printPriceFormatted				# stampo il price formattato correttamente
+        lw $ra, 0($sp)
+        addi $sp, $sp, 4				
 	j endTransaction
 	
 endTransaction:
@@ -385,9 +416,12 @@ printItem:
 	lb $t3, ($t1) 			# load $t1 = carattere successivo
 	bne $t3, $0, LOOP_str2int 	# brench se la stirnga non è finita
 	
-	li $v0, 1
 	la $a0, ($t2)
-	syscall
+      	addi $sp, $sp, -4	
+        sw $ra, 0($sp)
+        jal printPriceFormatted		# stampo il price formattato correttamente
+        lw $ra, 0($sp)
+        addi $sp, $sp, 4
 	
 	beqz $t7, end_print_line
 	add $t4, $t4, $t2		# incremento il totale complessivo con il prezzo appena generato
@@ -473,26 +507,27 @@ printCart:
 	jr $ra
 
 printPriceFormatted:				# Funzione che permette di scrivere i prezzi formattati nel modo xxx.xx
-	move $t0, $a0
-	li $t1, 0
-	check_length:
-	lb $t2, ($t1)
+	move $t0, $a0				# Stringa passata come argomento
 	
-	xor $t3, $t3, $t3  # $a2 will hold reverse integer
-     	li $t4, 10
-     	beqz $t1, end
-	loop:
-     		divu $a1, $t1      # Divide number by 10
-     		mflo $a1           # $a1 = quotient
-    		mfhi $t2           # $t2 = reminder
-     		mul $a2, $a2, $t1  # reverse=reverse*10
-     		addu $a2, $a2, $t2 #         + reminder    
-     		bgtz $a1, loop
-	end:
-	
-	
-	jr $ra 
+	div $t0, $t0, 100			# n/10
+	mfhi $t3				# mi salvo il resto da printare
 
-# Valutare se inserire funzionalità report
-reportTOTALS:
+	li $v0, 1
+	la $a0, ($t0)
+	syscall					# stampo i numeri prima della virgola
+	li $v0, 11				
+	li $a0, 44
+	syscall					# stampo la virgola
+	blt $t3, 10, print_zero
+	print_decimals:
+	li $v0, 1				
+	la $a0, ($t3)
+	syscall					# stampo i numeri dopo la virgola
+
 	jr $ra
+
+	print_zero:
+	li $v0, 1				
+	li $a0, 0
+	syscall					# stampo i numeri dopo la virgola
+	j print_decimals 
